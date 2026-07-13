@@ -24,7 +24,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "ili9341.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -87,10 +87,31 @@ extern void TouchGFX_Task(void *argument);
 
 /* USER CODE BEGIN PFP */
 
+  void SDRAM_Initialization_Sequence(SDRAM_HandleTypeDef *hsdram);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+void ILI9341_WriteReg(uint8_t reg)
+{
+  // Báo cho màn hình biết chuẩn bị gửi Command (WRX = 0)
+  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_13, GPIO_PIN_RESET); 
+  // Kéo chân CS xuống 0 để kích hoạt chip
+  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_2, GPIO_PIN_RESET);  
+  // Gửi 1 byte qua SPI5
+  HAL_SPI_Transmit(&hspi5, &reg, 1, 100);
+  // Kéo chân CS lên 1 để kết thúc
+  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_2, GPIO_PIN_SET);    
+}
+
+void ILI9341_WriteData(uint8_t data)
+{
+  // Báo cho màn hình biết chuẩn bị gửi Data (WRX = 1)
+  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_13, GPIO_PIN_SET);   
+  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_2, GPIO_PIN_RESET);  
+  HAL_SPI_Transmit(&hspi5, &data, 1, 100);
+  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_2, GPIO_PIN_SET);    
+}
 
 /* USER CODE END 0 */
 
@@ -133,6 +154,8 @@ int main(void)
   /* Call PreOsInit function */
   MX_TouchGFX_PreOSInit();
   /* USER CODE BEGIN 2 */
+  SDRAM_Initialization_Sequence(&hsdram1);
+  ili9341_Init();
 
   /* USER CODE END 2 */
 
@@ -485,7 +508,7 @@ static void MX_FMC_Init(void)
   }
 
   /* USER CODE BEGIN FMC_Init 2 */
-
+  SDRAM_Initialization_Sequence(&hsdram1);
   /* USER CODE END FMC_Init 2 */
 }
 
@@ -558,6 +581,91 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
+void SDRAM_Initialization_Sequence(SDRAM_HandleTypeDef *hsdram)
+{
+  FMC_SDRAM_CommandTypeDef command;
+
+  /* Bước 1: Kích hoạt xung nhịp cho SDRAM (Clock Enable) */
+  command.CommandMode            = FMC_SDRAM_CMD_CLK_ENABLE;
+  command.CommandTarget          = FMC_SDRAM_CMD_TARGET_BANK2; // Mạch DISCO dùng Bank 2
+  command.AutoRefreshNumber      = 1;
+  command.ModeRegisterDefinition = 0;
+  HAL_SDRAM_SendCommand(hsdram, &command, HAL_MAX_DELAY);
+  HAL_Delay(1); // Chờ RAM ổn định
+
+  /* Bước 2: Lệnh Precharge All */
+  command.CommandMode            = FMC_SDRAM_CMD_PALL;
+  HAL_SDRAM_SendCommand(hsdram, &command, HAL_MAX_DELAY);
+
+  /* Bước 3: Lệnh Auto Refresh */
+  command.CommandMode            = FMC_SDRAM_CMD_AUTOREFRESH_MODE;
+  command.AutoRefreshNumber      = 8;
+  HAL_SDRAM_SendCommand(hsdram, &command, HAL_MAX_DELAY);
+
+  /* Bước 4: Load Mode Register (Cấu hình độ trễ CAS Latency = 3, Burst Length = 1) */
+  command.CommandMode            = FMC_SDRAM_CMD_LOAD_MODE;
+  command.ModeRegisterDefinition = 0x0230; 
+  HAL_SDRAM_SendCommand(hsdram, &command, HAL_MAX_DELAY);
+
+  /* Bước 5: Đặt tần số Refresh Rate (Cho xung nhịp FMC 90MHz) */
+  HAL_SDRAM_ProgramRefreshRate(hsdram, 1386); 
+}
+
+/**
+  * @brief  Hàm tạo độ trễ cho thư viện LCD
+  * @param  Delay: Thời gian trễ (ms)
+  */
+void LCD_Delay(uint32_t Delay)
+{
+  HAL_Delay(Delay);
+}
+
+/**
+  * @brief  Hàm khởi tạo IO cho LCD (Các ngoại vi đã được CubeMX init nên hàm này cấu hình trạng thái ban đầu)
+  */
+void LCD_IO_Init(void)
+{
+  // Đảm bảo chân Chip Select (CS) ở mức CAO (không chọn chip) khi mới khởi động
+  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_2, GPIO_PIN_SET);
+}
+
+/**
+  * @brief  Hàm gửi 1 byte Lệnh (Command/Register) xuống LCD
+  * @param  Reg: Mã lệnh
+  */
+void LCD_IO_WriteReg(uint8_t Reg)
+{
+  // DC = 0: Báo cho LCD biết đây là Command
+  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_13, GPIO_PIN_RESET); 
+  // CS = 0: Chọn chip ILI9341
+  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_2, GPIO_PIN_RESET);  
+  
+  HAL_SPI_Transmit(&hspi5, &Reg, 1, 10);
+  
+  // CS = 1: Bỏ chọn chip
+  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_2, GPIO_PIN_SET);    
+}
+
+/**
+  * @brief  Hàm gửi 1 byte Dữ liệu (Data) xuống LCD
+  * @param  RegValue: Giá trị dữ liệu
+  */
+void LCD_IO_WriteData(uint16_t RegValue)
+{
+  // Cấu hình SPI của mạch là 8-bit, ta lấy 8 bit thấp của dữ liệu
+  uint8_t data = (uint8_t)RegValue;
+    
+  // DC = 1: Báo cho LCD biết đây là Data
+  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_13, GPIO_PIN_SET);   
+  // CS = 0: Chọn chip ILI9341
+  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_2, GPIO_PIN_RESET);  
+  
+  // Truyền 1 byte data qua SPI
+  HAL_SPI_Transmit(&hspi5, &data, 1, 10);
+  
+  // CS = 1: Bỏ chọn chip
+  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_2, GPIO_PIN_SET);    
+}
 /* USER CODE END 4 */
 
 /* USER CODE BEGIN Header_StartDefaultTask */
