@@ -35,7 +35,7 @@
 #include "stm32f4xx_hal.h"
 
 /* USER CODE BEGIN INCLUDE */
-
+#define CUSTOM_HID_EPIN_SIZE 9U
 /* USER CODE END INCLUDE */
 
 /** @addtogroup USBD_OTG_DRIVER
