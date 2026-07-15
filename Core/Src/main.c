@@ -24,6 +24,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "hid_events.h"
 #include "ili9341.h"
 /* USER CODE END Includes */
 
@@ -70,6 +71,17 @@ const osThreadAttr_t GUI_Task_attributes = {
   .priority = (osPriority_t) osPriorityNormal,
 };
 /* USER CODE BEGIN PV */
+osThreadId_t usbHidTaskHandle;
+const osThreadAttr_t usbHidTask_attributes = {
+  .name = "usbHidTask",
+  .stack_size = 256 * 4,
+  .priority = (osPriority_t) osPriorityAboveNormal,
+};
+
+osMessageQueueId_t hidQueueHandle;
+const osMessageQueueAttr_t hidQueue_attributes = {
+  .name = "hidQueue"
+};
 
 /* USER CODE END PV */
 
@@ -86,8 +98,8 @@ void StartDefaultTask(void *argument);
 extern void TouchGFX_Task(void *argument);
 
 /* USER CODE BEGIN PFP */
-
-  void SDRAM_Initialization_Sequence(SDRAM_HandleTypeDef *hsdram);
+void StartUsbHidTask(void *argument);
+void SDRAM_Initialization_Sequence(SDRAM_HandleTypeDef *hsdram);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -175,7 +187,7 @@ int main(void)
   /* USER CODE END RTOS_TIMERS */
 
   /* USER CODE BEGIN RTOS_QUEUES */
-  /* add queues, ... */
+  hidQueueHandle = osMessageQueueNew(8, sizeof(HID_Event_t), &hidQueue_attributes);
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
@@ -186,7 +198,7 @@ int main(void)
   GUI_TaskHandle = osThreadNew(TouchGFX_Task, NULL, &GUI_Task_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
-  /* add threads, ... */
+  usbHidTaskHandle = osThreadNew(StartUsbHidTask, NULL, &usbHidTask_attributes);
   /* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_EVENTS */
@@ -666,6 +678,44 @@ void LCD_IO_WriteData(uint16_t RegValue)
   // CS = 1: Bỏ chọn chip
   HAL_GPIO_WritePin(GPIOC, GPIO_PIN_2, GPIO_PIN_SET);    
 }
+
+/* STMPE811 low-level I2C hooks expected by the BSP component driver. */
+void IOE_Init(void)
+{
+  /* I2C3 is initialized by MX_I2C3_Init(). */
+}
+
+void IOE_ITConfig(void)
+{
+  /* Touch input is sampled by TouchGFX, so no STMPE811 interrupt is used. */
+}
+
+void IOE_Delay(uint32_t delay)
+{
+  HAL_Delay(delay);
+}
+
+void IOE_Write(uint8_t addr, uint8_t reg, uint8_t value)
+{
+  (void)HAL_I2C_Mem_Write(&hi2c3, addr, reg, I2C_MEMADD_SIZE_8BIT,
+                          &value, 1U, 0x3000U);
+}
+
+uint8_t IOE_Read(uint8_t addr, uint8_t reg)
+{
+  uint8_t value = 0U;
+
+  (void)HAL_I2C_Mem_Read(&hi2c3, addr, reg, I2C_MEMADD_SIZE_8BIT,
+                         &value, 1U, 0x3000U);
+  return value;
+}
+
+uint16_t IOE_ReadMultiple(uint8_t addr, uint8_t reg, uint8_t *buffer,
+                          uint16_t length)
+{
+  return (HAL_I2C_Mem_Read(&hi2c3, addr, reg, I2C_MEMADD_SIZE_8BIT,
+                           buffer, length, 0x3000U) == HAL_OK) ? 0U : 1U;
+}
 /* USER CODE END 4 */
 
 /* USER CODE BEGIN Header_StartDefaultTask */
@@ -686,6 +736,50 @@ void StartDefaultTask(void *argument)
     osDelay(1);
   }
   /* USER CODE END 5 */
+}
+
+/**
+  * @brief  Serializes TouchGFX input events into USB Custom HID reports.
+  * @param  argument: Not used
+  * @retval None
+  */
+void StartUsbHidTask(void *argument)
+{
+  HID_Event_t event;
+
+  (void)argument;
+
+  for (;;)
+  {
+    if (osMessageQueueGet(hidQueueHandle, &event, NULL, osWaitForever) != osOK)
+    {
+      continue;
+    }
+
+    switch (event.type)
+    {
+      case EV_MOUSE:
+        SendMouse(event.a, event.b, event.c);
+        break;
+
+      case EV_KEYBOARD:
+        SendKey(event.a, 1U);
+        osDelay(15U);
+        SendKey(0U, 0U);
+        break;
+
+      case EV_CONSUMER:
+        SendConsumer(event.a, 1U);
+        osDelay(15U);
+        SendConsumer(0U, 0U);
+        break;
+
+      default:
+        break;
+    }
+
+    osDelay(10U);
+  }
 }
 
 /**
