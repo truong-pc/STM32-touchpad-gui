@@ -67,6 +67,10 @@ void Error_Handler(void);
 #define MCU_ACTIVE_GPIO_Port GPIOE
 #define SPI5_NCS_Pin GPIO_PIN_1
 #define SPI5_NCS_GPIO_Port GPIOC
+#define BTN_LEFT_Pin GPIO_PIN_2
+#define BTN_LEFT_GPIO_Port GPIOG
+#define BTN_RIGHT_Pin GPIO_PIN_3
+#define BTN_RIGHT_GPIO_Port GPIOG
 
 /* USER CODE BEGIN Private defines */
 

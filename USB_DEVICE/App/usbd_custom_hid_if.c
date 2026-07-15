@@ -170,7 +170,7 @@ __ALIGN_BEGIN static uint8_t CUSTOM_HID_ReportDesc_HS[USBD_CUSTOM_HID_REPORT_DES
   0x81, 0x03,        /*   Input (Const) - 5 bit padding     */
 
   /* USER CODE END 1 */
-  0xC0    /*     END_COLLECTION             */
+   0xC0    /*     END_COLLECTION             */
 };
 /* USER CODE BEGIN PRIVATE_VARIABLES */
 
